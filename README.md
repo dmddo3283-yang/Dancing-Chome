@@ -2,6 +2,8 @@
 
 음악의 음량, 저음, 박자에 맞춰 macOS의 Chrome 창을 움직이는 Manifest V3 확장 프로그램입니다. 작은 떨림부터 박자 순간이동, 화면 밖 이탈과 반대편 재등장까지 강도를 조절할 수 있습니다.
 
+[![ZIP 다운로드](https://img.shields.io/badge/ZIP-다운로드-ff2d7a?style=for-the-badge&logo=googlechrome&logoColor=white)](https://github.com/dmddo3283-yang/Dancing-Chome/archive/refs/heads/main.zip)
+
 ## 설치
 
 ### ZIP으로 설치
