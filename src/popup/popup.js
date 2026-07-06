@@ -28,24 +28,12 @@ elements.powerButton.addEventListener("click", async () => {
     await refresh();
     return;
   }
-
-  setBusy("공유할 화면과 오디오를 선택하세요…");
-  const browserWindow = await chrome.windows.getCurrent();
-  await send({
-    type: Message.SAVE_SETTINGS,
-    settings: readSettings()
-  });
-  await chrome.windows.create({
-    url: chrome.runtime.getURL(`src/capture/capture.html?windowId=${browserWindow.id}`),
-    type: "popup",
-    width: 440,
-    height: 300,
-    focused: true
-  });
-  window.close();
+  await startTabCapture();
 });
 
-elements.tabFallback.addEventListener("click", async () => {
+elements.tabFallback.addEventListener("click", startDesktopCapture);
+
+async function startTabCapture() {
   setBusy("현재 탭의 사운드에 연결 중…");
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -62,7 +50,21 @@ elements.tabFallback.addEventListener("click", async () => {
     showError(error instanceof Error ? error.message : String(error));
   }
   await refresh();
-});
+}
+
+async function startDesktopCapture() {
+  setBusy("공유할 화면과 오디오를 선택하세요…");
+  const browserWindow = await chrome.windows.getCurrent();
+  await send({ type: Message.SAVE_SETTINGS, settings: readSettings() });
+  await chrome.windows.create({
+    url: chrome.runtime.getURL(`src/capture/capture.html?windowId=${browserWindow.id}`),
+    type: "popup",
+    width: 440,
+    height: 300,
+    focused: true
+  });
+  window.close();
+}
 
 for (const input of document.querySelectorAll("input")) {
   input.addEventListener("input", () => {
@@ -88,8 +90,8 @@ function renderState() {
   elements.powerButton.classList.toggle("running", running);
   elements.powerButton.querySelector("strong").textContent = running ? "STOP" : "START";
   elements.powerButton.querySelector("small").textContent = running
-    ? state.source === "tab" ? "현재 탭 사운드" : "모든 탭 사운드"
-    : "모든 탭 사운드";
+    ? state.source === "tab" ? "현재 탭 사운드" : "전체 화면 사운드"
+    : "현재 탭 사운드";
   elements.statusBadge.dataset.state = running ? "running" : "idle";
   elements.statusBadge.querySelector("b").textContent = running ? "LIVE" : "OFF";
   elements.tabFallback.hidden = running;
