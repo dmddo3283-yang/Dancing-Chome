@@ -12,10 +12,14 @@ export class MotionEngine {
     this.windowId = browserWindow.id;
     this.original = boundsOf(browserWindow);
     this.bounds = boundsOf(browserWindow);
-    this.anchor = { x: this.bounds.left, y: this.bounds.top };
+    this.home = { x: this.bounds.left, y: this.bounds.top };
+    this.pos = { x: this.bounds.left, y: this.bounds.top };
     this.settings = normalizeSettings(settings);
     this.lastUpdateAt = 0;
-    this.escape = null;
+    this.swim = 0;
+    this.level = 0;
+    this.surge = 0;
+    this.driftX = 0;
   }
 
   updateSettings(settings) {
@@ -27,104 +31,88 @@ export class MotionEngine {
 
     const profile = movementProfile(this.settings.intensity);
     if (now - this.lastUpdateAt < profile.updateInterval) return null;
+
+    const dt = this.lastUpdateAt
+      ? clamp((now - this.lastUpdateAt) / 1000, 0.001, 0.12)
+      : profile.updateInterval / 1000;
     this.lastUpdateAt = now;
 
     const energy = clamp(Number(frame?.energy) || 0, 0, 1);
     const bass = clamp(Number(frame?.bass) || 0, 0, 1);
     const beat = Boolean(frame?.beat);
-    const activity = Math.max(energy, bass * 0.8);
+    const activity = Math.max(energy, bass * 0.85);
 
-    if (activity < 0.012 && !this.escape) return null;
+    // 음량 변화가 진폭에 곧바로 튀지 않도록 완만하게 따라간다.
+    this.level = approach(this.level, activity, 3.2, dt);
 
-    if (this.escape) {
-      this.advanceEscape(profile, activity);
-    } else {
-      if (beat) this.jumpOnBeat(profile, activity);
-      if (this.settings.driftEnabled) this.advanceDrift(profile, activity);
+    // 비트는 순간 점프가 아니라, 서서히 부풀었다 가라앉는 "물결(surge)"로 반영한다.
+    if (beat) {
+      const kick = 0.35 + this.settings.beatBoost / 100 * 0.5;
+      this.surge = Math.min(1.4, this.surge + kick);
+    }
+    this.surge = approach(this.surge, 0, 2.4, dt);
 
-      if (
-        profile.offscreenEnabled &&
-        beat &&
-        activity > 0.18 &&
-        this.random() < 0.18 + profile.amount * 0.46
-      ) {
-        this.escape = { direction: this.random() < 0.5 ? -1 : 1, phase: "exit" };
-      }
+    const settled = this.level < 0.02 && this.surge < 0.02 && !this.settings.driftEnabled;
+    if (settled && Math.abs(this.pos.x - this.home.x) < 1 && Math.abs(this.pos.y - this.home.y) < 1) {
+      return null;
     }
 
-    const shake = profile.shakeRadius * activity;
-    const phase = now / 34;
-    const next = {
-      left: Math.round(this.anchor.x + Math.sin(phase * 1.73) * shake),
-      top: Math.round(this.anchor.y + Math.cos(phase * 2.11) * shake * 0.72)
+    // 유영 위상: 느리게 흐르되 소리가 커지거나 비트가 칠 때 살짝 빨라진다.
+    const swimSpeed = profile.swimSpeed * (0.6 + this.level * 0.8) * (1 + this.surge * 0.7);
+    this.swim += swimSpeed * dt;
+
+    // 좌우로 크게 미끄러지고(주), 위아래로 완만히 물결치는(부) 범고래식 궤적.
+    const amp = profile.reach * (this.level * 0.62 + this.surge * 0.5);
+    const swayX = 0.8 * Math.sin(this.swim) + 0.2 * Math.sin(this.swim * 1.9 + 0.7);
+    const swayY = Math.sin(this.swim * 0.5 + 1.2);
+
+    if (this.settings.driftEnabled) {
+      this.driftX += profile.driftSpeed * (0.35 + this.level) * dt;
+    }
+
+    const targetX = this.home.x + this.driftX + swayX * amp;
+    const targetY = this.home.y + swayY * amp * 0.42;
+
+    // 목표점을 향해 부드럽게 수렴(저역 통과) → 떨림 없이 미끄러진다.
+    this.pos.x = approach(this.pos.x, targetX, profile.follow, dt);
+    this.pos.y = approach(this.pos.y, targetY, profile.follow, dt);
+
+    this.confine(profile);
+
+    return {
+      windowId: this.windowId,
+      left: Math.round(this.pos.x),
+      top: Math.round(this.pos.y)
     };
-
-    this.bounds.left = next.left;
-    this.bounds.top = next.top;
-    return { windowId: this.windowId, ...next };
   }
 
-  jumpOnBeat(profile, activity) {
-    const beatScale = 0.25 + this.settings.beatBoost / 100;
-    const radius = profile.jumpRadius * beatScale * (0.35 + activity * 0.9);
-    const x = this.original.left + signed(this.random) * radius;
-    const y = this.original.top + signed(this.random) * radius * 0.56;
-
-    if (profile.offscreenEnabled) {
-      const limitX = this.bounds.width * 0.55;
-      const limitY = this.bounds.height * 0.35;
-      this.anchor.x = clamp(x, this.screenLeft - limitX, this.screenRight - this.bounds.width + limitX);
-      this.anchor.y = clamp(y, this.screenTop - limitY, this.screenBottom - this.bounds.height + limitY);
+  confine(profile) {
+    // 드리프트 사용 시: 창이 오른쪽 밖으로 완전히 나가면(=화면 안 보임) 왼쪽 밖으로 감아 다시 헤엄쳐 들어온다.
+    if (this.settings.driftEnabled) {
+      const lap = this.settings.screen.width + this.bounds.width;
+      if (this.pos.x > this.screenRight) {
+        this.pos.x -= lap;
+        this.driftX -= lap;
+      } else if (this.pos.x + this.bounds.width < this.screenLeft) {
+        this.pos.x += lap;
+        this.driftX += lap;
+      }
+      this.pos.y = clamp(this.pos.y, this.screenTop, Math.max(this.screenTop, this.screenBottom - this.bounds.height));
       return;
     }
 
-    this.anchor.x = clamp(x, this.screenLeft, Math.max(this.screenLeft, this.screenRight - this.bounds.width));
-    this.anchor.y = clamp(y, this.screenTop, Math.max(this.screenTop, this.screenBottom - this.bounds.height));
-  }
-
-  advanceDrift(profile, activity) {
-    if (this.anchor.x > this.screenRight + 24) {
-      this.anchor.x = this.screenLeft - this.bounds.width - 24;
-      return;
-    }
-
-    const outsideRight = this.anchor.x + this.bounds.width > this.screenRight;
-    const outsideLeft = this.anchor.x < this.screenLeft;
-    const edgeBoost = outsideRight || outsideLeft ? 4.8 : 1;
-    this.anchor.x += profile.driftSpeed * (0.45 + activity * 2.8) * edgeBoost;
-
-  }
-
-  advanceEscape(profile, activity) {
-    const speed = 20 + profile.amount * 48 + activity * 54;
-    this.anchor.x += this.escape.direction * speed;
-
-    const fullyOutsideRight = this.anchor.x > this.screenRight + 24;
-    const fullyOutsideLeft = this.anchor.x + this.bounds.width < this.screenLeft - 24;
-
-    if (this.escape.phase === "exit" && (fullyOutsideRight || fullyOutsideLeft)) {
-      this.escape.phase = "gone";
-      return;
-    }
-
-    if (this.escape.phase === "gone") {
-      this.anchor.x = this.escape.direction > 0
-        ? this.screenLeft - this.bounds.width - 24
-        : this.screenRight + 24;
-      this.escape.phase = "reenter";
-      return;
-    }
-
-    const visibleFromLeft = this.escape.direction > 0 && this.anchor.x >= this.screenLeft + 24;
-    const visibleFromRight = this.escape.direction < 0 && this.anchor.x + this.bounds.width <= this.screenRight - 24;
-    if (this.escape.phase === "reenter" && (visibleFromLeft || visibleFromRight)) {
-      this.anchor.x = clamp(
-        this.anchor.x,
-        this.screenLeft,
-        Math.max(this.screenLeft, this.screenRight - this.bounds.width)
-      );
-      this.escape = null;
-    }
+    const allowX = profile.offscreenEnabled ? this.bounds.width * 0.55 : 0;
+    const allowY = profile.offscreenEnabled ? this.bounds.height * 0.35 : 0;
+    this.pos.x = clamp(
+      this.pos.x,
+      this.screenLeft - allowX,
+      Math.max(this.screenLeft - allowX, this.screenRight - this.bounds.width + allowX)
+    );
+    this.pos.y = clamp(
+      this.pos.y,
+      this.screenTop - allowY,
+      Math.max(this.screenTop - allowY, this.screenBottom - this.bounds.height + allowY)
+    );
   }
 
   getRestoreOperation() {
@@ -136,10 +124,14 @@ export class MotionEngine {
     this.windowId = null;
     this.original = null;
     this.bounds = null;
-    this.anchor = null;
+    this.home = null;
+    this.pos = null;
     this.settings = null;
     this.lastUpdateAt = 0;
-    this.escape = null;
+    this.swim = 0;
+    this.level = 0;
+    this.surge = 0;
+    this.driftX = 0;
   }
 
   get screenLeft() {
@@ -168,8 +160,9 @@ function boundsOf(browserWindow) {
   };
 }
 
-function signed(random) {
-  return random() * 2 - 1;
+// 프레임 간격(dt)에 무관하게 일정한 속도로 목표에 수렴하는 지수 감쇠 보간.
+function approach(current, target, rate, dt) {
+  return current + (target - current) * (1 - Math.exp(-rate * dt));
 }
 
 function clamp(value, min, max) {

@@ -20,5 +20,10 @@ test("settings are clamped to safe ranges", () => {
 test("only extreme profiles may leave the screen", () => {
   assert.equal(movementProfile(87).offscreenEnabled, false);
   assert.equal(movementProfile(88).offscreenEnabled, true);
-  assert.ok(movementProfile(100).jumpRadius > movementProfile(20).jumpRadius * 10);
+  assert.ok(movementProfile(100).reach > movementProfile(20).reach * 5);
+});
+
+test("higher intensity swims wider and a touch faster", () => {
+  assert.ok(movementProfile(100).swimSpeed > movementProfile(20).swimSpeed);
+  assert.ok(movementProfile(100).reach > movementProfile(20).reach);
 });
