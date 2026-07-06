@@ -144,7 +144,7 @@ function syncLabels() {
     document.querySelector(`#${key}Value`).textContent = elements[key].value;
   }
   const value = Number(elements.intensity.value);
-  elements.intensityName.textContent = value >= 88 ? "OFFSCREEN" : value >= 65 ? "MAYHEM" : value >= 30 ? "BOUNCE" : "TICKLE";
+  elements.intensityName.textContent = value >= 88 ? "BREACH" : value >= 65 ? "SURGE" : value >= 30 ? "GLIDE" : "RIPPLE";
 }
 
 function setBusy(text) {

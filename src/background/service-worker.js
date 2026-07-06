@@ -22,6 +22,11 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 chrome.runtime.onStartup.addListener(() => setBadge(false));
 
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== "stop-motion" || !state.enabled) return;
+  stop({ restore: true, notifyOffscreen: true }).catch(() => {});
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleMessage(message, sender)
     .then(sendResponse)
