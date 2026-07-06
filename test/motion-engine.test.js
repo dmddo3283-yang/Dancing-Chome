@@ -19,23 +19,30 @@ test("moderate motion stays fully on screen", () => {
   }
 });
 
-test("motion glides smoothly without teleporting between frames", () => {
-  const engine = new MotionEngine({ random: () => 0.5 });
-  engine.start(browserWindow, { intensity: 60, beatBoost: 100, screen });
+test("motion darts erratically across a wide range while music plays", () => {
+  let seed = 987654321;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  const engine = new MotionEngine({ random });
+  engine.start(browserWindow, { intensity: 70, beatBoost: 100, screen });
 
-  let previous = null;
-  let moved = false;
-  for (let index = 1; index <= 60; index += 1) {
-    const operation = engine.step({ energy: 1, bass: 1, beat: index % 4 === 0 }, index * 40);
+  const lefts = [];
+  const tops = [];
+  for (let index = 1; index <= 80; index += 1) {
+    const operation = engine.step({ energy: 1, bass: 1, beat: index % 3 === 0 }, index * 30);
     if (!operation) continue;
-    if (previous) {
-      const jump = Math.hypot(operation.left - previous.left, operation.top - previous.top);
-      assert.ok(jump < 80, `frame jumped ${jump}px — motion should stay smooth`);
-      if (jump > 0.5) moved = true;
-    }
-    previous = operation;
+    lefts.push(operation.left);
+    tops.push(operation.top);
+    assert.ok(operation.left >= 0 && operation.left <= screen.width - browserWindow.width);
+    assert.ok(operation.top >= 0 && operation.top <= screen.height - browserWindow.height);
   }
-  assert.ok(moved, "window should actually move while music plays");
+
+  const spreadX = Math.max(...lefts) - Math.min(...lefts);
+  const spreadY = Math.max(...tops) - Math.min(...tops);
+  assert.ok(spreadX > 150, `expected frantic horizontal spread, got ${spreadX}px`);
+  assert.ok(spreadY > 80, `expected frantic vertical spread, got ${spreadY}px`);
 });
 
 test("silence lets the window settle back home", () => {

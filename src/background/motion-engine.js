@@ -20,6 +20,9 @@ export class MotionEngine {
     this.level = 0;
     this.surge = 0;
     this.driftX = 0;
+    this.dirX = 0;
+    this.dirY = 0;
+    this.nextDartAt = 0;
   }
 
   updateSettings(settings) {
@@ -42,40 +45,50 @@ export class MotionEngine {
     const beat = Boolean(frame?.beat);
     const activity = Math.max(energy, bass * 0.85);
 
-    // 음량 변화가 진폭에 곧바로 튀지 않도록 완만하게 따라간다.
-    this.level = approach(this.level, activity, 3.2, dt);
+    // 소리에 즉각 반응하도록 빠르게 따라간다(=더 정신없이).
+    this.level = approach(this.level, activity, 6, dt);
 
-    // 비트는 순간 점프가 아니라, 서서히 부풀었다 가라앉는 "물결(surge)"로 반영한다.
     if (beat) {
-      const kick = 0.35 + this.settings.beatBoost / 100 * 0.5;
-      this.surge = Math.min(1.4, this.surge + kick);
+      const kick = 0.45 + this.settings.beatBoost / 100 * 0.6;
+      this.surge = Math.min(1.6, this.surge + kick);
     }
-    this.surge = approach(this.surge, 0, 2.4, dt);
+    this.surge = approach(this.surge, 0, 3.4, dt);
 
+    const heat = Math.min(1, this.level + this.surge);
     const settled = this.level < 0.02 && this.surge < 0.02 && !this.settings.driftEnabled;
     if (settled && Math.abs(this.pos.x - this.home.x) < 1 && Math.abs(this.pos.y - this.home.y) < 1) {
       return null;
     }
 
-    // 유영 위상: 느리게 흐르되 소리가 커지거나 비트가 칠 때 살짝 빨라진다.
-    const swimSpeed = profile.swimSpeed * (0.6 + this.level * 0.8) * (1 + this.surge * 0.7);
-    this.swim += swimSpeed * dt;
+    const amp = profile.reach * (this.level * 0.9 + this.surge * 0.7);
 
-    // 좌우로 크게 미끄러지고(주), 위아래로 완만히 물결치는(부) 범고래식 궤적.
-    const amp = profile.reach * (this.level * 0.62 + this.surge * 0.5);
-    const swayX = 0.8 * Math.sin(this.swim) + 0.2 * Math.sin(this.swim * 1.9 + 0.7);
-    const swayY = Math.sin(this.swim * 0.5 + 1.2);
+    // 비트마다, 그리고 짧은 간격마다 엉뚱한 방향으로 홱 돌진한다.
+    if (beat || now >= this.nextDartAt) {
+      this.dirX = signed(this.random);
+      this.dirY = signed(this.random);
+      this.nextDartAt = now + profile.dartMs * (0.5 + this.random());
+    }
+
+    // 서로 안 맞는 여러 주파수를 겹쳐 난조(chaotic) 궤적을 만든다.
+    this.swim += profile.swimSpeed * (0.7 + heat) * dt;
+    const wobbleX = 0.6 * Math.sin(this.swim) + 0.3 * Math.sin(this.swim * 2.7 + 1.1) + 0.2 * Math.sin(this.swim * 5.3);
+    const wobbleY = 0.6 * Math.cos(this.swim * 1.3 + 0.5) + 0.3 * Math.sin(this.swim * 3.9 + 2.0) + 0.2 * Math.cos(this.swim * 6.1);
 
     if (this.settings.driftEnabled) {
       this.driftX += profile.driftSpeed * (0.35 + this.level) * dt;
     }
 
-    const targetX = this.home.x + this.driftX + swayX * amp;
-    const targetY = this.home.y + swayY * amp * 0.42;
+    const targetX = this.home.x + this.driftX + this.dirX * amp + wobbleX * amp * 0.6;
+    const targetY = this.home.y + this.dirY * amp * 0.85 + wobbleY * amp * 0.6;
 
-    // 목표점을 향해 부드럽게 수렴(저역 통과) → 떨림 없이 미끄러진다.
+    // 빠르게 홱홱 따라붙는다(부드럽게 미끄러지지 않는다).
     this.pos.x = approach(this.pos.x, targetX, profile.follow, dt);
     this.pos.y = approach(this.pos.y, targetY, profile.follow, dt);
+
+    // 매 프레임 부들부들 떨리는 잔진동을 얹는다.
+    const jitter = profile.jitter * heat;
+    this.pos.x += signed(this.random) * jitter;
+    this.pos.y += signed(this.random) * jitter;
 
     this.confine(profile);
 
@@ -87,7 +100,7 @@ export class MotionEngine {
   }
 
   confine(profile) {
-    // 드리프트 사용 시: 창이 오른쪽 밖으로 완전히 나가면(=화면 안 보임) 왼쪽 밖으로 감아 다시 헤엄쳐 들어온다.
+    // 드리프트 사용 시: 오른쪽 밖으로 완전히 나가면 왼쪽 밖에서 다시 튀어 들어온다.
     if (this.settings.driftEnabled) {
       const lap = this.settings.screen.width + this.bounds.width;
       if (this.pos.x > this.screenRight) {
@@ -101,8 +114,8 @@ export class MotionEngine {
       return;
     }
 
-    const allowX = profile.offscreenEnabled ? this.bounds.width * 0.55 : 0;
-    const allowY = profile.offscreenEnabled ? this.bounds.height * 0.35 : 0;
+    const allowX = profile.offscreenEnabled ? this.bounds.width * 0.6 : 0;
+    const allowY = profile.offscreenEnabled ? this.bounds.height * 0.4 : 0;
     this.pos.x = clamp(
       this.pos.x,
       this.screenLeft - allowX,
@@ -132,6 +145,9 @@ export class MotionEngine {
     this.level = 0;
     this.surge = 0;
     this.driftX = 0;
+    this.dirX = 0;
+    this.dirY = 0;
+    this.nextDartAt = 0;
   }
 
   get screenLeft() {
@@ -163,6 +179,10 @@ function boundsOf(browserWindow) {
 // 프레임 간격(dt)에 무관하게 일정한 속도로 목표에 수렴하는 지수 감쇠 보간.
 function approach(current, target, rate, dt) {
   return current + (target - current) * (1 - Math.exp(-rate * dt));
+}
+
+function signed(random) {
+  return random() * 2 - 1;
 }
 
 function clamp(value, min, max) {
