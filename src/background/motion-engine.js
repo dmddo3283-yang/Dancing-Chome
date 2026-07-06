@@ -28,7 +28,6 @@ export class MotionEngine {
     this.level = 0;
     this.surge = 0;
     this.scale = 1;
-    this.angle = 0;
     this.driftX = 0;
     this.driftDir = 1;
     this.nextDartAt = 0;
@@ -62,22 +61,9 @@ export class MotionEngine {
     }
     this.surge = approach(this.surge, 0, 3.2, dt);
 
-    const heat = Math.min(1, this.level + this.surge);
-    // 소리가 나면 계속 돌고, 조용해지면 가장 가까운 정방향(똑바로)으로 되돌아온다.
-    if (heat < 0.03) {
-      this.angle = approach(this.angle, Math.round(this.angle / 360) * 360, 4, dt);
-    } else {
-      this.angle += profile.spin * heat * dt;
-    }
-
-    const operation = this.settings.driftEnabled
+    return this.settings.driftEnabled
       ? this.driftFlight(profile, dt, now)
       : this.freeFlight(profile, dt, beat, now);
-
-    if (operation && this.settings.rotationEnabled) {
-      operation.rotation = Math.round(this.angle);
-    }
-    return operation;
   }
 
   // 관성을 가지고 목표점을 향해 날아가되 지나쳐 휘어지고, 벽에 부딪히면 튕겨 나가며 화면을 돌아다닌다.
@@ -157,14 +143,15 @@ export class MotionEngine {
     return this.finishOp();
   }
 
-  // 소리에 맞춰 창 크기를 부풀렸다 줄인다(비트에 크게 반응).
+  // 소리에 맞춰 창을 기본 크기에서 작게 줄였다가 다시 원래대로 키운다.
+  // 기본 크기가 최대이며, 절대 그보다 커지지 않는다(scale ≤ 1).
   applyPulse(profile, dt, now) {
     if (!this.settings.pulseEnabled) return;
-    const breathe = Math.sin(now * 0.004) * 0.1 * this.level;
-    const target = 1 + breathe + this.surge * 0.22;
+    const wobble = Math.abs(Math.sin(now * 0.004)) * 0.06 * this.level;
+    const target = 1 - (this.level * 0.12 + this.surge * 0.3 + wobble);
     this.scale = approach(this.scale, target, 8, dt);
-    this.bounds.width = Math.round(clamp(this.baseW * this.scale, this.baseW * 0.6, this.settings.screen.width));
-    this.bounds.height = Math.round(clamp(this.baseH * this.scale, this.baseH * 0.6, this.settings.screen.height));
+    this.bounds.width = Math.round(clamp(this.baseW * this.scale, this.baseW * 0.5, this.baseW));
+    this.bounds.height = Math.round(clamp(this.baseH * this.scale, this.baseH * 0.5, this.baseH));
   }
 
   finishOp() {
@@ -184,8 +171,6 @@ export class MotionEngine {
   atRest(box) {
     const homeDist = Math.hypot(this.pos.x - this.home.x, this.pos.y - this.home.y);
     if (homeDist >= 4 || Math.hypot(this.vel.x, this.vel.y) >= 60) return false;
-    if (this.settings.rotationEnabled &&
-      Math.abs(this.angle - Math.round(this.angle / 360) * 360) >= 1) return false;
     if (this.settings.pulseEnabled && Math.abs(this.scale - 1) >= 0.02) return false;
     return true;
   }
@@ -256,7 +241,6 @@ export class MotionEngine {
     this.level = 0;
     this.surge = 0;
     this.scale = 1;
-    this.angle = 0;
     this.driftX = 0;
     this.driftDir = 1;
     this.nextDartAt = 0;
