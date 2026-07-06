@@ -3,7 +3,6 @@ import { DEFAULT_SETTINGS, normalizeSettings } from "../shared/settings.js";
 
 const elements = {
   powerButton: document.querySelector("#powerButton"),
-  tabFallback: document.querySelector("#tabFallback"),
   statusBadge: document.querySelector("#statusBadge"),
   statusText: document.querySelector("#statusText"),
   intensityName: document.querySelector("#intensityName"),
@@ -31,8 +30,6 @@ elements.powerButton.addEventListener("click", async () => {
   await startTabCapture();
 });
 
-elements.tabFallback.addEventListener("click", startDesktopCapture);
-
 async function startTabCapture() {
   setBusy("현재 탭의 사운드에 연결 중…");
   try {
@@ -50,20 +47,6 @@ async function startTabCapture() {
     showError(error instanceof Error ? error.message : String(error));
   }
   await refresh();
-}
-
-async function startDesktopCapture() {
-  setBusy("공유할 화면과 오디오를 선택하세요…");
-  const browserWindow = await chrome.windows.getCurrent();
-  await send({ type: Message.SAVE_SETTINGS, settings: readSettings() });
-  await chrome.windows.create({
-    url: chrome.runtime.getURL(`src/capture/capture.html?windowId=${browserWindow.id}`),
-    type: "popup",
-    width: 440,
-    height: 300,
-    focused: true
-  });
-  window.close();
 }
 
 for (const input of document.querySelectorAll("input")) {
@@ -94,7 +77,6 @@ function renderState() {
     : "현재 탭 사운드";
   elements.statusBadge.dataset.state = running ? "running" : "idle";
   elements.statusBadge.querySelector("b").textContent = running ? "LIVE" : "OFF";
-  elements.tabFallback.hidden = running;
 
   if (state.error) {
     showError(state.error);
